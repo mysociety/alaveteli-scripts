@@ -1,0 +1,28 @@
+#!/bin/bash
+
+# Usage:
+# get-signin-ips DAYS
+
+function print_usage {
+    echo get-signin-ips DAYS
+}
+
+# Very simple error handling on arguments
+if [ "$#" -ne 1 ] ; then
+    print_usage
+    exit 1
+fi
+
+case "$1" in
+    --help|-h)
+	print_usage
+	exit 0
+	;;
+esac
+
+DAYS=$1
+
+for LOG in $(find . -name "production.log*" -mtime -"$DAYS"); do
+    # Grep for the IP addresses used to sign in
+    zgrep "Started.*POST.*sign_in.*for" "$LOG" | awk '{ print $12 }'
+done

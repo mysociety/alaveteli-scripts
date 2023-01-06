@@ -1,0 +1,39 @@
+#!/bin/bash
+
+# Usage:
+# get-ips-for-email DAYS EMAIL
+
+function print_usage {
+    echo get-ips-for-email DAYS EMAIL
+}
+
+# Very simple error handling on arguments
+if [ "$#" -ne 2 ] ; then
+    print_usage
+    exit 1
+fi
+
+case "$1" in
+    --help|-h)
+	print_usage
+	exit 0
+	;;
+esac
+
+TMPFILE=/tmp/emails-to-ids.$$
+DAYS=$1
+EMAIL=$2
+
+for LOG in $(find . -name "production.log*" -mtime -"$DAYS"); do
+    # Ensure $TMPFILE is empty for each log file iteration
+    :>$TMPFILE
+    # Grep for the email we want and print the associated Rails request ID to $TMPFILE
+    zgrep "$EMAIL" "$LOG" | awk '{ print $7}' | sed 's/[][]//g' > $TMPFILE
+    # For each ID, try and identify the requester's IP
+    for ID in $(cat $TMPFILE) ; do
+        echo ${LOG}:$(zgrep "$ID" "$LOG" | grep '" for ' | awk '{ print $12 }')
+    done
+done
+
+# Clean up
+rm -f $TMPFILE

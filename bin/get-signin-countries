@@ -1,0 +1,28 @@
+#!/bin/bash
+
+# Usage:
+# get-signin-countries DAYS
+
+function print_usage {
+    echo get-signin-countries DAYS
+}
+
+# Very simple error handling on arguments
+if [ "$#" -ne 1 ] ; then
+    print_usage
+    exit 1
+fi
+
+case "$1" in
+    --help|-h)
+	print_usage
+	exit 0
+	;;
+esac
+
+DAYS=$1
+
+for ip in $(/root/get-signin-ips $DAYS) ; do
+    geoiplookup "$ip" | head -n 1 | awk '{ print $4 }' | sed "s/,//g"
+done
+

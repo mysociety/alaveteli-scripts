@@ -1,0 +1,41 @@
+#!/bin/bash
+
+# Usage:
+# get-emails-for-ip DAYS IP_ADDRESS
+
+function print_usage {
+    echo get-emails-for-ip DAYS IP_ADDRESS
+}
+
+# Very simple error handling on arguments
+if [ "$#" -ne 2 ] ; then
+    print_usage
+    exit 1
+fi
+
+case "$1" in
+    --help|-h)
+	print_usage
+	exit 0
+	;;
+esac
+
+TMPFILE=/tmp/ids-to-emails.$$
+DAYS=$1
+IP_ADDRESS=$2
+
+for LOG in $(find . -name "production.log*" -mtime -"$DAYS"); do
+    # Ensure $TMPFILE is empty for each log file iteration
+    :>$TMPFILE
+    # Grep for the signins from the IP address we want and print the associated
+    # Rails request ID to $TMPFILE
+    zgrep "Started.*POST.*sign_in.*for\s$IP_ADDRESS" "$LOG" | awk '{ print $7}' | sed 's/[][]//g' > $TMPFILE
+    # For each ID, try and identify the user's signin email
+    for ID in $(cat $TMPFILE) ; do
+	# Might need gawk for this match https://stackoverflow.com/a/4673336
+	echo ${LOG}:$(zgrep "$ID" "$LOG" | grep 'email' | ruby -ne 'puts $_.match(/"email"=>"(.*?)"/)[1]')
+    done
+done
+
+# Clean up
+rm -f $TMPFILE

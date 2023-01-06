@@ -1,0 +1,13 @@
+#!/bin/bash
+
+TIMEOUT=${1:-1800}
+
+for job in "$(ps -ax -o pid,etimes,cmd | egrep "xapian:update_index|RequestMailer.alert_comment_on_request" | grep -v grep)"; do
+  [ -z "$job" ] && continue  
+  PID=$(echo $job | awk '{ print $1 }')
+  ELAPSED=$(echo $job | awk '{ print $2 }')
+  if [ $ELAPSED -gt $TIMEOUT ] ; then
+      echo "Killing $job"
+      kill -HUP $PID
+  fi
+done
