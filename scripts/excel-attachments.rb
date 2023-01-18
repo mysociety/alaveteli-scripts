@@ -3,7 +3,7 @@
 #
 
 unless ENV['PUBLIC_BODY_URL_NAME']
-  puts 'Requires PUBLIC_BODY_URL_NAME envrionment variable'
+  puts 'Requires PUBLIC_BODY_URL_NAME environment variable'
   exit 1
 end
 
