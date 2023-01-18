@@ -1,0 +1,109 @@
+#!/usr/bin/env ruby
+
+require 'net/https'
+require 'yaml'
+
+if ARGV.length != 2
+  STDERR.puts "Usage: #{$0} <ALAVETELI-VERSION> <DESTINATION-YAML>"
+  exit 1
+end
+
+VERSION = ARGV[0]
+CONFIG_FILE = ARGV[1]
+
+def default_source
+  uri = URI("https://raw.githubusercontent.com/mysociety/alaveteli/#{VERSION}" \
+            "/config/general.yml-example")
+
+  @default_source ||= Net::HTTP.get(uri)
+end
+
+def default_config
+  YAML.load(default_source)
+end
+
+def current_config
+  YAML.load_file(CONFIG_FILE)
+end
+
+def merge_config(default, current)
+  config = {}
+
+  keys_from_config(default).each do |cop|
+    d = default[cop]
+    c = current[cop]
+
+    if !c.nil?
+      config[cop] = c
+    else
+      config[cop] = d
+    end
+  end
+
+  config
+end
+
+def keys_from_config(config)
+  config.keys
+end
+
+def header_comment
+  comment = []
+
+  default_source.split("\n").each do |line|
+    comment << line if line =~ /^#/
+    break if line == ''
+  end
+
+  comment.join("\n")
+end
+
+def comments
+  comment = []
+  @comments ||= default_source.split("\n").inject({}) do |memo, line|
+    line.strip!
+
+    if line == ''
+      comment = []
+
+    elsif line =~ /^#/
+      comment << line
+
+    elsif line =~ /^([A-Z_]+):/
+      k = Regexp.last_match(1)
+      memo[k] = comment.join("\n")
+      comment = []
+
+    end
+
+    memo
+  end
+end
+
+def comment_for_key(key)
+  comments[key]
+end
+
+def write_config(config)
+  yaml = config.to_yaml.force_encoding('ASCII-8BIT')
+
+  # remove YAML header
+  yaml.sub!(/^---$/, '')
+
+  # increase indent of array items
+  yaml.gsub!(/^( *- )/, '  \1')
+
+  # re-add helpful configuration comments
+  keys_from_config(config).each do |k|
+    comment = comment_for_key(k)
+    if comment && comment != ""
+      yaml.sub!(/^#{k}:/, "\n" + comment + "\n#{k}:")
+    else
+      yaml.sub!(/\n*#{k}:/, "#{k}:")
+    end
+  end
+
+  File.write(CONFIG_FILE, header_comment + yaml)
+end
+
+write_config(merge_config(default_config, current_config))
