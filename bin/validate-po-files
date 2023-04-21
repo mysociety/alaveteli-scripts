@@ -1,0 +1,143 @@
+#!/usr/bin/env ruby
+
+require 'pathname'
+ENV['BUNDLE_GEMFILE'] ||= File.expand_path('../../Gemfile',
+  Pathname.new(__FILE__).realpath)
+
+require 'rubygems'
+require 'gettext/mo'
+require 'gettext/po_parser'
+
+require 'git'
+require 'pry'
+
+def process(diff)
+  Hash[diff.map { |diff_file| process_diff_file(diff_file) }]
+end
+
+def process_diff_file(diff_file)
+  [File.join(Dir.pwd, diff_file.path),
+   calc_line_numbers(diff_file.patch.scan(/^@@(.*)@@/).flatten)]
+end
+
+def calc_line_numbers(diff_line_summaries)
+  diff_line_summaries.map do |line_summary|
+    git_line_summary_to_numbers(line_summary.strip)
+  end.flatten
+end
+
+def git_line_summary_to_numbers(text)
+  start, count = text.scan(/\+(.*)/).join.scan(/\d+/).flatten.map(&:to_i)
+  count ||= 1
+  (start..(start + count - 1)).to_a
+end
+
+def read_between_lines(file, line_number)
+  # Open the file and read its contents
+  contents = File.readlines(file)
+
+  # Find the line number and index of the first blank line preceding it
+  i = line_number - 1
+  while i >= 0 && contents[i]&.strip != ''
+    i -= 1
+  end
+  start_index = i + 1
+
+  # Find the index of the first blank line following the line number
+  i = line_number - 1
+  while i < contents.length && contents[i]&.strip != ''
+    i += 1
+  end
+  end_index = i - 1
+
+  # Return the text between the two line numbers
+  [contents[start_index..end_index].join(''), (start_index+1..end_index+1)]
+end
+
+def create_po_file(content)
+  po_file = Tempfile.new("temp.po")
+  po_file.print(content)
+  po_file.close
+  po_file
+end
+
+def parse_po_file(po_file, parsed_entries)
+  parser = GetText::POParser.new
+  parser.parse_file(po_file.path, parsed_entries)
+end
+
+def validate_html_tags(input_string)
+  stack = []
+
+  # Define a regular expression pattern to match HTML tags
+  pattern = /<\s*(\/?(?!.*@)[a-zA-Z]+)\s*[^>]*>/
+
+  # Use the regular expression pattern to find and validate all tags in the input string
+  input_string.scan(pattern) do |match|
+    tag = match[0]
+    next if %w[area base br col embed hr img input link meta param source track wbr].include?(tag)
+    if tag[0] == '/'
+      # Found a closing tag, check if it matches the most recent opening tag
+      if stack.empty? || stack[-1] != tag[1..-1]
+        return false
+      else
+        stack.pop()
+      end
+    else
+      # Found an opening tag, add it to the stack
+      stack.push(tag)
+    end
+  end
+
+  # If there are any unclosed tags, the input string is invalid
+  return stack.empty?
+end
+
+changed_lines = process(Git.open(Dir.pwd).diff('HEAD', '-U0'))
+
+MATCH = /\{\{([^\}]+)\}\}/
+
+locale = ARGV[0]
+locale ||= '*'
+
+po_files = Dir.glob("locale*/#{locale}/*.po").sort
+po_files.each do |po_file|
+  errors = {}
+
+  changes = changed_lines["#{Dir.pwd}/#{po_file}"]
+  next unless changes
+
+  lines_checked = []
+
+  changes.each do |line|
+    next if lines_checked.any? { _1.include?(line) }
+
+    content, range = *read_between_lines(po_file, line)
+    lines_checked << range
+
+    temp_po_file = create_po_file(content)
+    messages = parse_po_file(temp_po_file, GetText::MO.new)
+    temp_po_file.unlink
+
+    messages.each do |message, translation|
+      errors[line] = []
+      next unless translation
+
+      # check all interpolation strings are present in translation
+      strings = message.gsub(MATCH).to_a
+      strings.reject! { |string| translation =~ /#{string}/ }
+      errors[line] << "Missing #{strings.join ', '}" unless strings.empty?
+
+      # check translation has valid html tags
+      valid_html = validate_html_tags(translation)
+      errors[line] << "Invalid HTML" unless valid_html
+    end
+  end
+
+  next if errors.empty?
+
+  errors.each do |line, line_errors|
+    next if line_errors.empty?
+    puts "#{po_file}##{line}: #{line_errors.join ', '}"
+  end
+end
